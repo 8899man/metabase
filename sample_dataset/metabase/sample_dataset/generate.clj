@@ -1,13 +1,14 @@
 (ns metabase.sample-dataset.generate
   "Logic for generating the sample dataset.
    Run this with `lein generate-sample-dataset`."
-  (:require [clojure.java
+  (:require [clojure
+             [edn :as edn]
+             [string :as s]]
+            [clojure.java
              [io :as io]
              [jdbc :as jdbc]]
             [clojure.math.numeric-tower :as math]
-            [clojure.string :as s]
             [faker
-             [address :as address]
              [company :as company]
              [internet :as internet]
              [lorem :as lorem]
@@ -29,16 +30,6 @@
 
 ;;; ## PEOPLE
 
-(defn- random-latitude []
-  (-> (rand)
-      (* 180)
-      (- 90)))
-
-(defn- random-longitude []
-  (-> (rand)
-      (* 360)
-      (- 180)))
-
 (defn ^Date random-date-between [^Date min, ^Date max]
   (let [min-ms (.getTime min)
         max-ms (.getTime max)
@@ -47,19 +38,34 @@
     (.setTime d (+ (long (rand range)) min-ms))
     d))
 
+(def ^:private addresses (atom nil))
+
+(defn- load-addresses! []
+  (println "Loading addresses...")
+  (reset! addresses (edn/read-string (slurp "sample_dataset/metabase/sample_dataset/addresses.edn")))
+  :ok)
+
+(defn- next-address []
+  (when-not (seq @addresses)
+    (load-addresses!))
+  (let [address (first @addresses)]
+    (swap! addresses rest)
+    address))
+
 (defn- random-person []
   (let [first (name/first-name)
-        last  (name/last-name)]
+        last  (name/last-name)
+        addr  (next-address)]
     {:name       (format "%s %s" first last)
      :email      (internet/free-email (format "%s.%s" first last))
      :password   (str (java.util.UUID/randomUUID))
      :birth_date (random-date-between (u/relative-date :year -60) (u/relative-date :year -18))
-     :address    (address/street-address)
-     :city       (address/city)
-     :zip        (apply str (take 5 (address/zip-code)))
-     :state      (address/us-state-abbr)
-     :latitude   (random-latitude)
-     :longitude  (random-longitude)
+     :address    (str (:house-number addr) " " (:street addr))
+     :city       (:city addr)
+     :zip        (:zip addr)
+     :state      (:state-abbrev addr)
+     :latitude   (:lat addr)
+     :longitude  (:lon addr)
      :source     (rand-nth ["Google" "Twitter" "Facebook" "Organic" "Affiliate"])
      :created_at (random-date-between (u/relative-date :year -2) (u/relative-date :year 1))}))
 
@@ -129,7 +135,7 @@
 
 ;;; ## ORDERS
 
-(def ^:private ^:const state->tax-rate
+(def ^:private state->tax-rate
   {"AK" 0.0
    "AL" 0.04
    "AR" 0.065
